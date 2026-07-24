@@ -263,7 +263,7 @@ WIN_H := 600
 SB_W  := 220
 HD_H  := 54
 
-myGui := Gui("-Caption +Border +LastFound", APP_NAME)
+myGui := Gui("-Caption +Border", APP_NAME)
 myGui.BackColor := COL_BG
 myGui.MarginX := 0
 myGui.MarginY := 0
@@ -514,6 +514,10 @@ ShowSection(key) {
     global sections, currentSection, sectionTitle, navHwnds, navRowBgs, NAV
     global COL_SIDEBAR, COL_NAV_SEL, COL_TEXT, COL_TEXT_DIM
 
+    ; DEBUG: prove the click reached the handler
+    ToolTip("click -> " key, , , 1)
+    SetTimer(() => ToolTip(,,,1), -1200)
+
     if currentSection = key
         return
     for s, ctrls in sections {
@@ -561,35 +565,9 @@ TrimC(hex) {
     return hex
 }
 
-; ================================================================
-;  drag-by-header (using WM_NCHITTEST, not WM_LBUTTONDOWN, so we
-;  don't accidentally eat button clicks)
-; ================================================================
-
-OnMessage(0x84, WM_NCHITTEST_Handler)
-
-WM_NCHITTEST_Handler(wParam, lParam, msg, hwnd) {
-    global myGui, HD_H, SB_W
-    if hwnd != myGui.Hwnd
-        return
-
-    ; lParam packs screen coords as two 16-bit signed ints
-    x := lParam & 0xFFFF
-    if x > 32767
-        x -= 65536
-    y := (lParam >> 16) & 0xFFFF
-    if y > 32767
-        y -= 65536
-
-    WinGetPos(&winX, &winY, , , "ahk_id " hwnd)
-    relX := x - winX
-    relY := y - winY
-
-    ; Header strip (right of sidebar) - report as caption so the OS drags us
-    if (relY < HD_H && relX > SB_W && relX < (myGui.MarginX + 700))
-        return 2   ; HTCAPTION
-    return
-}
+; Drag-by-header removed for this build. We have zero custom message
+; handlers now - if a click still fails to register, the culprit is
+; something other than message hooks.
 
 ; ================================================================
 ;  show + init
