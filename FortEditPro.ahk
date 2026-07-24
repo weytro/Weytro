@@ -209,15 +209,25 @@ BoundHotkeys := []
 
 BindHotkeys() {
     global cfg, BoundHotkeys
+
+    ; Turn OFF any existing bindings from previous calls
     for hk in BoundHotkeys {
         try Hotkey hk, "Off"
     }
     BoundHotkeys := []
 
+    ; Context: hotkeys only exist when the guard passes.
+    ; When the guard is on, that means "only when Fortnite is focused."
+    ; When the guard is off, InFortnite() returns true unconditionally
+    ; so hotkeys are active everywhere.
+    if cfg["requireFortnite"]
+        HotIf (*) => InFortnite()
+    else
+        HotIf  ; clear - active in every window
+
     BindHold(cfgKey, fn) {
         global cfg, BoundHotkeys
-        ; ~ = pass native key through (so C, F etc still type normally
-        ; outside Fortnite). * = fire regardless of modifiers.
+        ; ~ passes the native key through, * fires regardless of modifiers
         hk := "~*" cfg[cfgKey]
         try {
             Hotkey hk, ((n) => (*) => fn(n))(hk), "On"
@@ -235,6 +245,9 @@ BindHotkeys() {
         Hotkey hk, DoInstaBuild, "On"
         BoundHotkeys.Push(hk)
     }
+
+    ; Clear the context for anything defined after this call
+    HotIf
 }
 
 ; Register global control hotkeys ONCE at startup, outside BindHotkeys()
@@ -309,20 +322,18 @@ for idx, item in NAV {
     key   := item[1]
     label := item[2]
 
-    ; Full-width clickable Text control (Progress can't fire Click in v2).
-    ; The Text itself acts as both background and hit area.
-    rowBg := myGui.Add("Text"
-        , "x0 y" navY " w" SB_W " h40 Background" COL_SIDEBAR, "")
-    lbl := myGui.Add("Text"
-        , "x20 y" (navY + 10) " w" (SB_W - 30) " h22 Background" COL_SIDEBAR
-        , label)
+    ; Single Text control per row - full width, contains the label,
+    ; explicit background. Windows skips hit-testing on empty static
+    ; controls so a separate transparent hit-area doesn't work.
+    row := myGui.Add("Text"
+        , "x0 y" navY " w" SB_W " h40 Background" COL_SIDEBAR
+        , "`n     " label)
 
     handler := ((k) => (*) => ShowSection(k))(key)
-    rowBg.OnEvent("Click", handler)
-    lbl.OnEvent("Click",   handler)
+    row.OnEvent("Click", handler)
 
-    navRowBgs[key] := rowBg
-    navHwnds[key]  := lbl
+    navRowBgs[key] := row
+    navHwnds[key]  := row
     navY += 44
 }
 
