@@ -309,9 +309,10 @@ for idx, item in NAV {
     key   := item[1]
     label := item[2]
 
-    ; Full-width clickable row - explicit background so hit test is reliable
-    rowBg := myGui.Add("Progress"
-        , "x0 y" navY " w" SB_W " h40 Background" COL_SIDEBAR " Range0-1", 0)
+    ; Full-width clickable Text control (Progress can't fire Click in v2).
+    ; The Text itself acts as both background and hit area.
+    rowBg := myGui.Add("Text"
+        , "x0 y" navY " w" SB_W " h40 Background" COL_SIDEBAR, "")
     lbl := myGui.Add("Text"
         , "x20 y" (navY + 10) " w" (SB_W - 30) " h22 Background" COL_SIDEBAR
         , label)
@@ -478,30 +479,21 @@ for row in tFields {
 ; --- action buttons row ---
 btnY := contentY + 260
 
-; Apply changes (accent)
-applyBg := myGui.Add("Progress"
-    , "x" contentX " y" btnY " w180 h40 Background" COL_ACCENT " Range0-1", 0)
+; Apply changes (accent) - single Text control acts as background + label
 myGui.SetFont("s10 bold cWhite", "Segoe UI")
-applyLbl := myGui.Add("Text"
-    , "x" contentX " y" (btnY + 10) " w180 h20 Center Background" COL_ACCENT
-    , "Apply changes")
-applyBg.OnEvent("Click",  (*) => (BindHotkeys(), FlashToast("Hotkeys rebound")))
-applyLbl.OnEvent("Click", (*) => (BindHotkeys(), FlashToast("Hotkeys rebound")))
-AddToSection("settings", applyBg)
-AddToSection("settings", applyLbl)
+applyBtn := myGui.Add("Text"
+    , "x" contentX " y" btnY " w180 h40 Center Background" COL_ACCENT
+    , "`n Apply changes")
+applyBtn.OnEvent("Click", (*) => (BindHotkeys(), FlashToast("Hotkeys rebound")))
+AddToSection("settings", applyBtn)
 
 ; Exit App (danger)
 exitX := contentX + 200
-exitBg := myGui.Add("Progress"
-    , "x" exitX " y" btnY " w180 h40 Background" COL_DANGER " Range0-1", 0)
-myGui.SetFont("s10 bold cWhite", "Segoe UI")
-exitLbl := myGui.Add("Text"
-    , "x" exitX " y" (btnY + 10) " w180 h20 Center Background" COL_DANGER
-    , "Exit app")
-exitBg.OnEvent("Click",  (*) => ExitApp())
-exitLbl.OnEvent("Click", (*) => ExitApp())
-AddToSection("settings", exitBg)
-AddToSection("settings", exitLbl)
+exitBtn := myGui.Add("Text"
+    , "x" exitX " y" btnY " w180 h40 Center Background" COL_DANGER
+    , "`n Exit app")
+exitBtn.OnEvent("Click", (*) => ExitApp())
+AddToSection("settings", exitBtn)
 
 ; --- info card ---
 infoY := btnY + 60
@@ -532,9 +524,9 @@ ShowSection(key) {
     for _, item in NAV {
         k := item[1]
         selected := (k = key)
-        try navRowBgs[k].Opt("Background" (selected ? COL_NAV_SEL : COL_SIDEBAR))
-        navRowBgs[k].Value := 0    ; force repaint
-        try navHwnds[k].Opt("Background" (selected ? COL_NAV_SEL : COL_SIDEBAR))
+        col := selected ? COL_NAV_SEL : COL_SIDEBAR
+        try navRowBgs[k].Opt("Background" col)
+        try navHwnds[k].Opt("Background" col)
     }
     for _, item in NAV {
         if item[1] = key {
