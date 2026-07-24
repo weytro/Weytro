@@ -5,6 +5,9 @@ on:
     branches: ['**']
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -36,19 +39,14 @@ jobs:
           }
           if (-not $rel) { throw "No AutoHotkey release endpoint responded" }
 
-          Write-Host "Assets:"
-          $rel.assets | ForEach-Object { Write-Host "  $($_.name)  ($($_.size) bytes)" }
-
           $asset = $rel.assets |
               Where-Object { $_.name -match '\.zip$' -and $_.name -notmatch 'setup|Ahk2Exe|debug|Source' } |
               Select-Object -First 1
           if (-not $asset) { throw "No usable AHK zip asset found in $($rel.tag_name)" }
 
-          Write-Host "Downloading $($asset.name)"
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile ahk.zip -UseBasicParsing
           New-Item -ItemType Directory -Path ahk -Force | Out-Null
           Expand-Archive ahk.zip -DestinationPath ahk -Force
-          Get-ChildItem ahk -Recurse -File | Select-Object FullName, Length
 
       - name: Download Ahk2Exe compiler (github release)
         shell: pwsh
@@ -58,8 +56,6 @@ jobs:
           $headers = @{ 'User-Agent' = 'weytro-ci'; 'Accept' = 'application/vnd.github+json' }
 
           $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/AutoHotkey/Ahk2Exe/releases/latest" -Headers $headers
-          Write-Host "Ahk2Exe release: $($rel.tag_name)"
-          $rel.assets | ForEach-Object { Write-Host "  $($_.name)  ($($_.size) bytes)" }
 
           $asset = $rel.assets |
               Where-Object { $_.name -match '\.zip$' } |
@@ -69,7 +65,6 @@ jobs:
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile ahk2exe.zip -UseBasicParsing
           New-Item -ItemType Directory -Path ahk2exe -Force | Out-Null
           Expand-Archive ahk2exe.zip -DestinationPath ahk2exe -Force
-          Get-ChildItem ahk2exe -Recurse -File | Select-Object FullName, Length
 
       - name: Locate compiler + base
         shell: pwsh
@@ -100,8 +95,28 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          & "$env:AHK2EXE" /in FortEditPro.ahk /out FortEditPro.exe /base "$env:AHK_BASE"
-          if (-not (Test-Path FortEditPro.exe)) { throw "Compile failed - no exe produced" }
+
+          $args = @(
+              "/in",   "FortEditPro.ahk",
+              "/out",  "FortEditPro.exe",
+              "/base", "$env:AHK_BASE"
+          )
+          Write-Host "Running: $env:AHK2EXE $($args -join ' ')"
+
+          $p = Start-Process -FilePath "$env:AHK2EXE" `
+                             -ArgumentList $args `
+                             -Wait -NoNewWindow -PassThru
+          Write-Host "Ahk2Exe exit code: $($p.ExitCode)"
+
+          # Ahk2Exe sometimes flushes the exe just after exiting - give it a beat.
+          $deadline = (Get-Date).AddSeconds(15)
+          while (-not (Test-Path FortEditPro.exe) -and (Get-Date) -lt $deadline) {
+              Start-Sleep -Milliseconds 500
+          }
+
+          if (-not (Test-Path FortEditPro.exe)) {
+              throw "Compile failed - no exe produced (exit $($p.ExitCode))"
+          }
           $size = (Get-Item FortEditPro.exe).Length / 1MB
           Write-Host ("Built FortEditPro.exe: {0:N2} MB" -f $size)
 
@@ -111,3 +126,16 @@ jobs:
           name: FortEditPro
           path: FortEditPro.exe
           if-no-files-found: error
+
+      - name: Publish as GitHub Release (one-click download)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: FortEditPro.exe
+          tag_name: build-${{ github.run_number }}
+          name: "FortEditPro build #${{ github.run_number }}"
+          body: |
+            Automated build from commit ${{ github.sha }}.
+
+            Download `FortEditPro.exe` below - no install needed.
+          fail_on_unmatched_files: true
+          make_latest: "true"
