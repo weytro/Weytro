@@ -216,7 +216,9 @@ BindHotkeys() {
 
     BindHold(cfgKey, fn) {
         global cfg, BoundHotkeys
-        hk := "*" cfg[cfgKey]
+        ; ~ = pass native key through (so C, F etc still type normally
+        ; outside Fortnite). * = fire regardless of modifiers.
+        hk := "~*" cfg[cfgKey]
         try {
             Hotkey hk, ((n) => (*) => fn(n))(hk), "On"
             BoundHotkeys.Push(hk)
@@ -228,7 +230,7 @@ BindHotkeys() {
     BindHold("pickupSpamTrigger",   DoPickupSpam)
     BindHold("crouchJitterTrigger", DoCrouchJitter)
 
-    hk := "*" cfg["instaBuildTrigger"]
+    hk := "~*" cfg["instaBuildTrigger"]
     try {
         Hotkey hk, DoInstaBuild, "On"
         BoundHotkeys.Push(hk)
@@ -364,7 +366,7 @@ MakeCard(key, x, y, w, h, title) {
     AddToSection(key, bg)
     myGui.SetFont("s9 bold c" TrimC(COL_TEXT_DIM), "Segoe UI")
     ttl := myGui.Add("Text", "x" (x + 16) " y" (y + 12) " w" (w - 32)
-        " h16 Background" COL_CARD, Format("{:U}", title))
+        " h16 Background" COL_CARD, StrUpper(title))
     AddToSection(key, ttl)
 }
 
