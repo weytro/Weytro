@@ -2,18 +2,11 @@
 #SingleInstance Force
 #Warn All, Off
 
-; Ahk2Exe compile hints: request admin so keys work in Fortnite (elevated).
-;@Ahk2Exe-SetMainIcon
-;@Ahk2Exe-SetName FortEditPro
-;@Ahk2Exe-SetDescription FortEditPro - premium macro suite
-
-; Runtime self-elevation for uncompiled runs.
-if !A_IsAdmin {
-    try {
-        Run '*RunAs "' A_ScriptFullPath '"'
-        ExitApp
-    }
-}
+; NOTE: auto-elevation removed. Some laptop trackpad drivers synthesize
+; clicks as user-mode input, which Windows won't deliver to an admin
+; window (UIPI). Keeping the exe non-admin so setup clicks work. If you
+; find hotkeys don't hook Fortnite when playing, right-click the exe
+; and "Run as administrator" for that session.
 
 Persistent
 SetTitleMatchMode 2
@@ -569,16 +562,33 @@ TrimC(hex) {
 }
 
 ; ================================================================
-;  drag-by-header
+;  drag-by-header (using WM_NCHITTEST, not WM_LBUTTONDOWN, so we
+;  don't accidentally eat button clicks)
 ; ================================================================
 
-OnMessage(0x201, WM_LBUTTONDOWN_Handler)
+OnMessage(0x84, WM_NCHITTEST_Handler)
 
-WM_LBUTTONDOWN_Handler(wParam, lParam, msg, hwnd) {
-    global myGui, headerBg, brand, sectionTitle
-    if (hwnd = headerBg.Hwnd || hwnd = brand.Hwnd || hwnd = sectionTitle.Hwnd) {
-        PostMessage(0xA1, 2, 0, , "ahk_id " myGui.Hwnd)
-    }
+WM_NCHITTEST_Handler(wParam, lParam, msg, hwnd) {
+    global myGui, HD_H, SB_W
+    if hwnd != myGui.Hwnd
+        return
+
+    ; lParam packs screen coords as two 16-bit signed ints
+    x := lParam & 0xFFFF
+    if x > 32767
+        x -= 65536
+    y := (lParam >> 16) & 0xFFFF
+    if y > 32767
+        y -= 65536
+
+    WinGetPos(&winX, &winY, , , "ahk_id " hwnd)
+    relX := x - winX
+    relY := y - winY
+
+    ; Header strip (right of sidebar) - report as caption so the OS drags us
+    if (relY < HD_H && relX > SB_W && relX < (myGui.MarginX + 700))
+        return 2   ; HTCAPTION
+    return
 }
 
 ; ================================================================
