@@ -316,24 +316,23 @@ NAV := [
 navHwnds   := Map()
 navRowBgs  := Map()
 
-myGui.SetFont("s10 c" TrimC(COL_TEXT), "Segoe UI")
+; Real Button controls for the nav - guaranteed clickable. We swap the
+; button LABEL to include a leading marker for the selected item since
+; native Buttons don't accept Background color.
+myGui.SetFont("s10 Norm", "Segoe UI")
 navY := 90
 for idx, item in NAV {
     key   := item[1]
     label := item[2]
 
-    ; Single Text control per row - full width, contains the label,
-    ; explicit background. Windows skips hit-testing on empty static
-    ; controls so a separate transparent hit-area doesn't work.
-    row := myGui.Add("Text"
-        , "x0 y" navY " w" SB_W " h40 Background" COL_SIDEBAR
-        , "`n     " label)
+    btn := myGui.Add("Button"
+        , "x10 y" navY " w" (SB_W - 20) " h36", label)
 
     handler := ((k) => (*) => ShowSection(k))(key)
-    row.OnEvent("Click", handler)
+    btn.OnEvent("Click", handler)
 
-    navRowBgs[key] := row
-    navHwnds[key]  := row
+    navRowBgs[key] := btn   ; reused for selected-state label swap
+    navHwnds[key]  := btn
     navY += 44
 }
 
@@ -487,22 +486,18 @@ for row in tFields {
     fy += 42
 }
 
-; --- action buttons row ---
+; --- action buttons row (real Button controls) ---
 btnY := contentY + 260
+myGui.SetFont("s10 Norm", "Segoe UI")
 
-; Apply changes (accent) - single Text control acts as background + label
-myGui.SetFont("s10 bold cWhite", "Segoe UI")
-applyBtn := myGui.Add("Text"
-    , "x" contentX " y" btnY " w180 h40 Center Background" COL_ACCENT
-    , "`n Apply changes")
+applyBtn := myGui.Add("Button"
+    , "x" contentX " y" btnY " w180 h40 Default", "Apply changes")
 applyBtn.OnEvent("Click", (*) => (BindHotkeys(), FlashToast("Hotkeys rebound")))
 AddToSection("settings", applyBtn)
 
-; Exit App (danger)
 exitX := contentX + 200
-exitBtn := myGui.Add("Text"
-    , "x" exitX " y" btnY " w180 h40 Center Background" COL_DANGER
-    , "`n Exit app")
+exitBtn := myGui.Add("Button"
+    , "x" exitX " y" btnY " w180 h40", "Exit app")
 exitBtn.OnEvent("Click", (*) => ExitApp())
 AddToSection("settings", exitBtn)
 
@@ -533,11 +528,13 @@ ShowSection(key) {
             c.Visible := (s = key)
     }
     for _, item in NAV {
-        k := item[1]
-        selected := (k = key)
-        col := selected ? COL_NAV_SEL : COL_SIDEBAR
-        try navRowBgs[k].Opt("Background" col)
-        try navHwnds[k].Opt("Background" col)
+        k         := item[1]
+        origLabel := item[2]
+        selected  := (k = key)
+        ; Native Button controls can't be recolored - mark the active
+        ; tab with a leading arrow instead.
+        prefix := selected ? Chr(0x25B6) " " : "   "
+        try navHwnds[k].Text := prefix origLabel
     }
     for _, item in NAV {
         if item[1] = key {
