@@ -1,6 +1,20 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 #Warn All, Off
+
+; Ahk2Exe compile hints: request admin so keys work in Fortnite (elevated).
+;@Ahk2Exe-SetMainIcon
+;@Ahk2Exe-SetName FortEditPro
+;@Ahk2Exe-SetDescription FortEditPro - premium macro suite
+
+; Runtime self-elevation for uncompiled runs.
+if !A_IsAdmin {
+    try {
+        Run '*RunAs "' A_ScriptFullPath '"'
+        ExitApp
+    }
+}
+
 Persistent
 SetTitleMatchMode 2
 SetKeyDelay -1, -1
@@ -8,26 +22,24 @@ SetMouseDelay -1
 SendMode "Input"
 
 ; ================================================================
-;  FortEditPro  —  v1.2  (premium UI)
+;  FortEditPro  —  v1.3
 ; ================================================================
 
 APP_NAME    := "FortEditPro"
-APP_VERSION := "1.2.0"
+APP_VERSION := "1.3.0"
 CONFIG_FILE := A_ScriptDir "\config.ini"
 
-; ---- palette ----
 COL_BG        := "0x0F0F14"
 COL_SIDEBAR   := "0x16161D"
 COL_CARD      := "0x1C1C26"
-COL_CARD_HI   := "0x24243040"
-COL_BORDER    := "0x2A2A38"
 COL_TEXT      := "0xE6E6EE"
 COL_TEXT_DIM  := "0x8A8A99"
 COL_ACCENT    := "0x7C3AED"
 COL_ACCENT_HI := "0x9061FF"
+COL_DANGER    := "0xEF4444"
 COL_OK        := "0x22C55E"
-COL_BAD       := "0xEF4444"
 COL_INPUT     := "0x22222E"
+COL_NAV_SEL   := "0x2A2140"
 
 cfg := Map(
     "editKey","G", "confirmKey","LButton", "resetKey","RButton",
@@ -42,6 +54,10 @@ cfg := Map(
 )
 
 LoadConfig()
+
+; ================================================================
+;  macro helpers
+; ================================================================
 
 JDelay(base := 0) {
     global cfg
@@ -217,10 +233,12 @@ BindHotkeys() {
         Hotkey hk, DoInstaBuild, "On"
         BoundHotkeys.Push(hk)
     }
-
-    try Hotkey "F8", ToggleEnabled, "On"
-    try Hotkey "F9", (*) => ExitApp(), "On"
 }
+
+; Register global control hotkeys ONCE at startup, outside BindHotkeys()
+; so a bad trigger config can never wipe them.
+try Hotkey "*F8", ToggleEnabled, "On"
+try Hotkey "*F9", (*) => ExitApp(), "On"
 
 ToggleEnabled(*) {
     global cfg
@@ -242,43 +260,46 @@ myGui.BackColor := COL_BG
 myGui.MarginX := 0
 myGui.MarginY := 0
 
+; ---------- backgrounds (added FIRST so they sit under everything) ----------
 sidebarBg := myGui.Add("Progress"
     , "x0 y0 w" SB_W " h" WIN_H " Background" COL_SIDEBAR " Range0-1", 0)
-
-headerBg := myGui.Add("Progress"
+headerBg  := myGui.Add("Progress"
     , "x" SB_W " y0 w" (WIN_W - SB_W) " h" HD_H
       " Background" COL_CARD " Range0-1", 0)
 
+; ---------- brand (in sidebar) ----------
 myGui.SetFont("s16 bold cWhite", "Segoe UI")
 brand := myGui.Add("Text"
-    , "x20 y18 w" (SB_W - 40) " h26 BackgroundTrans", APP_NAME)
+    , "x0 y18 w" SB_W " h26 Center Background" COL_SIDEBAR, APP_NAME)
 
 myGui.SetFont("s8 c" TrimC(COL_TEXT_DIM), "Segoe UI")
-myGui.Add("Text", "x20 y42 w" (SB_W - 40) " h14 BackgroundTrans"
+myGui.Add("Text", "x0 y42 w" SB_W " h14 Center Background" COL_SIDEBAR
     , "v" APP_VERSION "  •  premium")
 
+; ---------- section title (in header) ----------
 myGui.SetFont("s13 bold cWhite", "Segoe UI")
 sectionTitle := myGui.Add("Text"
-    , "x" (SB_W + 24) " y18 w400 h22 BackgroundTrans", "Macros")
+    , "x" (SB_W + 24) " y18 w400 h22 Background" COL_CARD, "Macros")
 
+; ---------- close / minimize (clickable text with explicit bg) ----------
 myGui.SetFont("s14 bold cWhite", "Segoe UI")
 minBtn := myGui.Add("Text"
-    , "x" (WIN_W - 76) " y14 w28 h28 Center BackgroundTrans", Chr(0x2013))
+    , "x" (WIN_W - 76) " y14 w28 h28 Center Background" COL_CARD, Chr(0x2013))
 closeBtn := myGui.Add("Text"
-    , "x" (WIN_W - 42) " y14 w28 h28 Center BackgroundTrans", "X")
+    , "x" (WIN_W - 42) " y14 w28 h28 Center Background" COL_CARD, "X")
 
 closeBtn.OnEvent("Click", (*) => ExitApp())
 minBtn.OnEvent("Click",   (*) => myGui.Minimize())
 
+; ---------- nav ----------
 NAV := [
-    ["macros",  "Macros"],
-    ["binds",   "In-game binds"],
-    ["timing",  "Timing"],
-    ["about",   "About"]
+    ["macros",   "Macros"],
+    ["binds",    "In-game binds"],
+    ["settings", "Settings"]
 ]
 
-navHwnds := Map()
-navAccents := Map()
+navHwnds   := Map()
+navRowBgs  := Map()
 
 myGui.SetFont("s10 c" TrimC(COL_TEXT), "Segoe UI")
 navY := 90
@@ -286,20 +307,24 @@ for idx, item in NAV {
     key   := item[1]
     label := item[2]
 
-    accent := myGui.Add("Progress"
-        , "x0 y" navY " w4 h36 Background" COL_ACCENT " Range0-1", 0)
-    accent.Visible := false
+    ; Full-width clickable row - explicit background so hit test is reliable
+    rowBg := myGui.Add("Progress"
+        , "x0 y" navY " w" SB_W " h40 Background" COL_SIDEBAR " Range0-1", 0)
+    lbl := myGui.Add("Text"
+        , "x20 y" (navY + 10) " w" (SB_W - 30) " h22 Background" COL_SIDEBAR
+        , label)
 
-    t := myGui.Add("Text"
-        , "x20 y" (navY + 8) " w" (SB_W - 30) " h22 BackgroundTrans", label)
-    t.OnEvent("Click", ((k) => (*) => ShowSection(k))(key))
+    handler := ((k) => (*) => ShowSection(k))(key)
+    rowBg.OnEvent("Click", handler)
+    lbl.OnEvent("Click",   handler)
 
-    navHwnds[key]   := t
-    navAccents[key] := accent
+    navRowBgs[key] := rowBg
+    navHwnds[key]  := lbl
     navY += 44
 }
 
-statusPillBg := myGui.Add("Progress"
+; ---------- status pill (bottom of sidebar) ----------
+myGui.Add("Progress"
     , "x20 y" (WIN_H - 90) " w" (SB_W - 40) " h34"
       " Background" COL_CARD " Range0-1", 0)
 
@@ -307,15 +332,19 @@ myGui.SetFont("s10 bold cWhite", "Segoe UI")
 statusDot := myGui.Add("Progress"
     , "x32 y" (WIN_H - 78) " w10 h10 Background" COL_OK " Range0-1", 0)
 statusText := myGui.Add("Text"
-    , "x48 y" (WIN_H - 80) " w120 h22 BackgroundTrans", "Active")
+    , "x48 y" (WIN_H - 80) " w120 h22 Background" COL_CARD, "Active")
 
 myGui.SetFont("s8 c" TrimC(COL_TEXT_DIM), "Segoe UI")
-myGui.Add("Text", "x20 y" (WIN_H - 44) " w" (SB_W - 40)
-    " h30 BackgroundTrans"
+myGui.Add("Text", "x20 y" (WIN_H - 44) " w" (SB_W - 40) " h30 Background" COL_SIDEBAR
     , "F8  toggle all macros`nF9  kill script")
+
+; ================================================================
+;  content sections
+; ================================================================
 
 contentX := SB_W + 24
 contentY := HD_H + 24
+cardW    := WIN_W - SB_W - 48
 
 sections := Map()
 
@@ -328,57 +357,53 @@ AddToSection(key, ctrl) {
     sections[key].Push(ctrl)
 }
 
-MakeCard(x, y, w, h, title) {
-    global myGui
-    ctrls := []
+MakeCard(key, x, y, w, h, title) {
+    global myGui, COL_CARD, COL_TEXT_DIM
     bg := myGui.Add("Progress"
-        , "x" x " y" y " w" w " h" h
-          " Background" COL_CARD " Range0-1", 0)
-    ctrls.Push(bg)
+        , "x" x " y" y " w" w " h" h " Background" COL_CARD " Range0-1", 0)
+    AddToSection(key, bg)
     myGui.SetFont("s9 bold c" TrimC(COL_TEXT_DIM), "Segoe UI")
-    ttl := myGui.Add("Text", "x" (x + 16) " y" (y + 12) " w"
-        (w - 32) " h16 BackgroundTrans", StrUpper(title))
-    ctrls.Push(ttl)
-    return ctrls
+    ttl := myGui.Add("Text", "x" (x + 16) " y" (y + 12) " w" (w - 32)
+        " h16 Background" COL_CARD, Format("{:U}", title))
+    AddToSection(key, ttl)
 }
 
-MakeField(x, y, w, cfgKey, label, isSlider := false
-        , minV := 0, maxV := 100, tick := 10) {
-    global myGui, cfg
-    ctrls := []
+MakeKeyField(key, x, y, w, cfgKey, label) {
+    global myGui, cfg, COL_TEXT, COL_CARD, COL_INPUT
     myGui.SetFont("s9 c" TrimC(COL_TEXT), "Segoe UI")
-    lbl := myGui.Add("Text", "x" x " y" y " w" (w - 160)
-        " h22 BackgroundTrans", label)
-    ctrls.Push(lbl)
+    lbl := myGui.Add("Text", "x" x " y" y " w" (w - 160) " h22 Background" COL_CARD, label)
+    AddToSection(key, lbl)
 
-    if isSlider {
-        s := myGui.Add("Slider", "x" (x + w - 150) " y" (y - 2)
-            " w110 Range" minV "-" maxV " TickInterval" tick, cfg[cfgKey])
-        myGui.SetFont("s10 bold cWhite", "Segoe UI")
-        v := myGui.Add("Text", "x" (x + w - 32) " y" y
-            " w32 h22 Right BackgroundTrans", cfg[cfgKey])
-        s.OnEvent("Change", ((c, disp) => (ctrl, *) => (
-            cfg[c] := ctrl.Value, disp.Value := ctrl.Value, SaveConfig()
-        ))(cfgKey, v))
-        ctrls.Push(s), ctrls.Push(v)
-    } else {
-        f := myGui.Add("Edit", "x" (x + w - 150) " y" (y - 2)
-            " w140 h24 Background" COL_INPUT " cWhite -E0x200 Center"
-            , cfg[cfgKey])
-        f.OnEvent("LoseFocus", ((c) => (ctrl, *) => (
-            cfg[c] := ctrl.Value, SaveConfig()
-        ))(cfgKey))
-        ctrls.Push(f)
-    }
-    return ctrls
+    f := myGui.Add("Edit", "x" (x + w - 150) " y" (y - 2)
+        " w140 h24 Background" COL_INPUT " cWhite -E0x200 Center", cfg[cfgKey])
+    f.OnEvent("LoseFocus", ((c) => (ctrl, *) => (
+        cfg[c] := ctrl.Value, SaveConfig()
+    ))(cfgKey))
+    AddToSection(key, f)
 }
 
-MakeSection("macros")
+MakeSlider(key, x, y, w, cfgKey, label, minV, maxV, tick) {
+    global myGui, cfg, COL_TEXT, COL_CARD
+    myGui.SetFont("s9 c" TrimC(COL_TEXT), "Segoe UI")
+    lbl := myGui.Add("Text", "x" x " y" y " w" (w - 160) " h22 Background" COL_CARD, label)
+    AddToSection(key, lbl)
 
-cardW := WIN_W - SB_W - 48
-card := MakeCard(contentX, contentY, cardW, 260, "Macro triggers")
-for c in card
-    AddToSection("macros", c)
+    s := myGui.Add("Slider", "x" (x + w - 150) " y" (y - 2) " w110 Range" minV "-" maxV
+        " TickInterval" tick, cfg[cfgKey])
+    myGui.SetFont("s10 bold cWhite", "Segoe UI")
+    v := myGui.Add("Text", "x" (x + w - 32) " y" y " w32 h22 Right Background" COL_CARD, cfg[cfgKey])
+    s.OnEvent("Change", ((c, disp) => (ctrl, *) => (
+        cfg[c] := ctrl.Value, disp.Value := ctrl.Value, SaveConfig()
+    ))(cfgKey, v))
+    AddToSection(key, s)
+    AddToSection(key, v)
+}
+
+; ================================================================
+;  section: MACROS
+; ================================================================
+MakeSection("macros")
+MakeCard("macros", contentX, contentY, cardW, 260, "Macro triggers")
 
 macFields := [
     ["holdDoubleTrigger",   "Hold-double-edit"],
@@ -387,35 +412,30 @@ macFields := [
     ["instaBuildTrigger",   "Insta-build (turtle)"],
     ["crouchJitterTrigger", "Crouch jitter"]
 ]
-
 fy := contentY + 44
 for pair in macFields {
-    ctrls := MakeField(contentX + 20, fy, cardW - 40, pair[1], pair[2])
-    for c in ctrls
-        AddToSection("macros", c)
+    MakeKeyField("macros", contentX + 20, fy, cardW - 40, pair[1], pair[2])
     fy += 40
 }
 
+; safety card
 card2Y := contentY + 280
-card := MakeCard(contentX, card2Y, cardW, 100, "Safety")
-for c in card
-    AddToSection("macros", c)
+MakeCard("macros", contentX, card2Y, cardW, 100, "Safety")
 
 myGui.SetFont("s10 c" TrimC(COL_TEXT), "Segoe UI")
 fnOnly := myGui.Add("CheckBox", "x" (contentX + 20) " y" (card2Y + 46)
-    " w400 cWhite Background" COL_CARD " Checked"
-    (cfg["requireFortnite"] ? 1 : 0)
+    " w400 cWhite Background" COL_CARD " Checked" (cfg["requireFortnite"] ? 1 : 0)
     , "Only fire macros when Fortnite is focused")
 fnOnly.OnEvent("Click", (ctrl, *) => (
     cfg["requireFortnite"] := ctrl.Value, SaveConfig()
 ))
 AddToSection("macros", fnOnly)
 
+; ================================================================
+;  section: BINDS
+; ================================================================
 MakeSection("binds")
-
-card := MakeCard(contentX, contentY, cardW, 400, "Your in-game binds")
-for c in card
-    AddToSection("binds", c)
+MakeCard("binds", contentX, contentY, cardW, 400, "Your in-game binds")
 
 bindFields := [
     ["editKey",    "Edit key"],
@@ -430,17 +450,15 @@ bindFields := [
 ]
 fy := contentY + 44
 for pair in bindFields {
-    ctrls := MakeField(contentX + 20, fy, cardW - 40, pair[1], pair[2])
-    for c in ctrls
-        AddToSection("binds", c)
+    MakeKeyField("binds", contentX + 20, fy, cardW - 40, pair[1], pair[2])
     fy += 38
 }
 
-MakeSection("timing")
-
-card := MakeCard(contentX, contentY, cardW, 240, "Timing (milliseconds)")
-for c in card
-    AddToSection("timing", c)
+; ================================================================
+;  section: SETTINGS
+; ================================================================
+MakeSection("settings")
+MakeCard("settings", contentX, contentY, cardW, 240, "Timing (milliseconds)")
 
 tFields := [
     ["baseDelay",      "Base delay",       4,  40, 5],
@@ -450,57 +468,59 @@ tFields := [
 ]
 fy := contentY + 50
 for row in tFields {
-    ctrls := MakeField(contentX + 20, fy, cardW - 40
-        , row[1], row[2], true, row[3], row[4], row[5])
-    for c in ctrls
-        AddToSection("timing", c)
+    MakeSlider("settings", contentX + 20, fy, cardW - 40
+        , row[1], row[2], row[3], row[4], row[5])
     fy += 42
 }
 
-rebindY := contentY + 260
+; --- action buttons row ---
+btnY := contentY + 260
+
+; Apply changes (accent)
+applyBg := myGui.Add("Progress"
+    , "x" contentX " y" btnY " w180 h40 Background" COL_ACCENT " Range0-1", 0)
 myGui.SetFont("s10 bold cWhite", "Segoe UI")
-rebindBg := myGui.Add("Progress"
-    , "x" contentX " y" rebindY " w180 h40 Background" COL_ACCENT
-      " Range0-1", 0)
-rebindLbl := myGui.Add("Text"
-    , "x" contentX " y" (rebindY + 10) " w180 h20 Center BackgroundTrans"
+applyLbl := myGui.Add("Text"
+    , "x" contentX " y" (btnY + 10) " w180 h20 Center Background" COL_ACCENT
     , "Apply changes")
-rebindLbl.OnEvent("Click", (*) => (BindHotkeys(), FlashToast("Hotkeys rebound")))
-rebindBg.OnEvent("Click",  (*) => (BindHotkeys(), FlashToast("Hotkeys rebound")))
-AddToSection("timing", rebindBg)
-AddToSection("timing", rebindLbl)
+applyBg.OnEvent("Click",  (*) => (BindHotkeys(), FlashToast("Hotkeys rebound")))
+applyLbl.OnEvent("Click", (*) => (BindHotkeys(), FlashToast("Hotkeys rebound")))
+AddToSection("settings", applyBg)
+AddToSection("settings", applyLbl)
 
-MakeSection("about")
+; Exit App (danger)
+exitX := contentX + 200
+exitBg := myGui.Add("Progress"
+    , "x" exitX " y" btnY " w180 h40 Background" COL_DANGER " Range0-1", 0)
+myGui.SetFont("s10 bold cWhite", "Segoe UI")
+exitLbl := myGui.Add("Text"
+    , "x" exitX " y" (btnY + 10) " w180 h20 Center Background" COL_DANGER
+    , "Exit app")
+exitBg.OnEvent("Click",  (*) => ExitApp())
+exitLbl.OnEvent("Click", (*) => ExitApp())
+AddToSection("settings", exitBg)
+AddToSection("settings", exitLbl)
 
-card := MakeCard(contentX, contentY, cardW, 220, "About")
-for c in card
-    AddToSection("about", c)
-
-myGui.SetFont("s10 c" TrimC(COL_TEXT), "Segoe UI")
-a1 := myGui.Add("Text"
-    , "x" (contentX + 20) " y" (contentY + 44) " w" (cardW - 40)
-      " h22 BackgroundTrans", APP_NAME " - high-performance macro suite")
-AddToSection("about", a1)
-
-myGui.SetFont("s9 c" TrimC(COL_TEXT_DIM), "Segoe UI")
-a2 := myGui.Add("Text"
-    , "x" (contentX + 20) " y" (contentY + 72) " w" (cardW - 40)
-      " h60 BackgroundTrans"
-    , "Version " APP_VERSION "`nBuilt for Fortnite. Optimized delays,"
-    . " humanized jitter, per-key remapping, session-persistent config.")
-AddToSection("about", a2)
+; --- info card ---
+infoY := btnY + 60
+MakeCard("settings", contentX, infoY, cardW, 90, "About")
 
 myGui.SetFont("s9 c" TrimC(COL_TEXT_DIM), "Segoe UI")
-a3 := myGui.Add("Text"
-    , "x" (contentX + 20) " y" (contentY + 150) " w" (cardW - 40)
-      " h50 BackgroundTrans"
-    , "License:  active`nSupport:  discord.gg/yourserver")
-AddToSection("about", a3)
+infoLbl := myGui.Add("Text"
+    , "x" (contentX + 16) " y" (infoY + 40) " w" (cardW - 32) " h40 Background" COL_CARD
+    , APP_NAME " v" APP_VERSION "`nSupport: discord.gg/yourserver")
+AddToSection("settings", infoLbl)
+
+; ================================================================
+;  section switching
+; ================================================================
 
 currentSection := ""
 
 ShowSection(key) {
-    global sections, currentSection, sectionTitle, navHwnds, navAccents, NAV
+    global sections, currentSection, sectionTitle, navHwnds, navRowBgs, NAV
+    global COL_SIDEBAR, COL_NAV_SEL, COL_TEXT, COL_TEXT_DIM
+
     if currentSection = key
         return
     for s, ctrls in sections {
@@ -509,10 +529,10 @@ ShowSection(key) {
     }
     for _, item in NAV {
         k := item[1]
-        navAccents[k].Visible := (k = key)
-        try navHwnds[k].Opt(
-            (k = key) ? "c" TrimC("0xFFFFFF") : "c" TrimC(COL_TEXT_DIM)
-        )
+        selected := (k = key)
+        try navRowBgs[k].Opt("Background" (selected ? COL_NAV_SEL : COL_SIDEBAR))
+        navRowBgs[k].Value := 0    ; force repaint
+        try navHwnds[k].Opt("Background" (selected ? COL_NAV_SEL : COL_SIDEBAR))
     }
     for _, item in NAV {
         if item[1] = key {
@@ -524,13 +544,13 @@ ShowSection(key) {
 }
 
 UpdateStatusPill() {
-    global cfg, statusText, statusDot, COL_OK, COL_BAD
+    global cfg, statusText, statusDot, COL_OK, COL_DANGER
     if cfg["enabled"] {
         statusText.Value := "Active"
         statusDot.Opt("Background" COL_OK)
     } else {
         statusText.Value := "Paused"
-        statusDot.Opt("Background" COL_BAD)
+        statusDot.Opt("Background" COL_DANGER)
     }
     statusDot.Value := 0
 }
@@ -546,19 +566,22 @@ TrimC(hex) {
     return hex
 }
 
-StrUpper(s) {
-    return Format("{:U}", s)
-}
+; ================================================================
+;  drag-by-header
+; ================================================================
 
 OnMessage(0x201, WM_LBUTTONDOWN_Handler)
 
 WM_LBUTTONDOWN_Handler(wParam, lParam, msg, hwnd) {
-    global myGui, headerBg, brand, sectionTitle, sidebarBg
-    if (hwnd = headerBg.Hwnd || hwnd = brand.Hwnd
-        || hwnd = sectionTitle.Hwnd || hwnd = sidebarBg.Hwnd) {
+    global myGui, headerBg, brand, sectionTitle
+    if (hwnd = headerBg.Hwnd || hwnd = brand.Hwnd || hwnd = sectionTitle.Hwnd) {
         PostMessage(0xA1, 2, 0, , "ahk_id " myGui.Hwnd)
     }
 }
+
+; ================================================================
+;  show + init
+; ================================================================
 
 myGui.Show("w" WIN_W " h" WIN_H)
 ShowSection("macros")
