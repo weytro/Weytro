@@ -11,36 +11,95 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install AutoHotkey v2 (chocolatey)
+      - name: Download AutoHotkey v2 interpreter (github release)
         shell: pwsh
         run: |
-          choco install autohotkey --version=2.0.11 -y --no-progress
-          Write-Host "-- AutoHotkey install tree --"
-          Get-ChildItem "C:\Program Files\AutoHotkey" -Recurse | Select-Object FullName
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference    = "SilentlyContinue"
+          $headers = @{ 'User-Agent' = 'weytro-ci'; 'Accept' = 'application/vnd.github+json' }
+
+          $candidates = @(
+              "https://api.github.com/repos/AutoHotkey/AutoHotkey_L/releases/latest",
+              "https://api.github.com/repos/AutoHotkey/AutoHotkey/releases/latest",
+              "https://api.github.com/repos/Lexikos/AutoHotkey_L/releases/latest"
+          )
+          $rel = $null
+          foreach ($u in $candidates) {
+              try {
+                  Write-Host "Trying $u"
+                  $rel = Invoke-RestMethod -Uri $u -Headers $headers -ErrorAction Stop
+                  Write-Host "  ok, tag=$($rel.tag_name)"
+                  break
+              } catch {
+                  Write-Host "  $($_.Exception.Message)"
+              }
+          }
+          if (-not $rel) { throw "No AutoHotkey release endpoint responded" }
+
+          Write-Host "Assets:"
+          $rel.assets | ForEach-Object { Write-Host "  $($_.name)  ($($_.size) bytes)" }
+
+          $asset = $rel.assets |
+              Where-Object { $_.name -match '\.zip$' -and $_.name -notmatch 'setup|Ahk2Exe|debug|Source' } |
+              Select-Object -First 1
+          if (-not $asset) { throw "No usable AHK zip asset found in $($rel.tag_name)" }
+
+          Write-Host "Downloading $($asset.name)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile ahk.zip -UseBasicParsing
+          New-Item -ItemType Directory -Path ahk -Force | Out-Null
+          Expand-Archive ahk.zip -DestinationPath ahk -Force
+          Get-ChildItem ahk -Recurse -File | Select-Object FullName, Length
+
+      - name: Download Ahk2Exe compiler (github release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference    = "SilentlyContinue"
+          $headers = @{ 'User-Agent' = 'weytro-ci'; 'Accept' = 'application/vnd.github+json' }
+
+          $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/AutoHotkey/Ahk2Exe/releases/latest" -Headers $headers
+          Write-Host "Ahk2Exe release: $($rel.tag_name)"
+          $rel.assets | ForEach-Object { Write-Host "  $($_.name)  ($($_.size) bytes)" }
+
+          $asset = $rel.assets |
+              Where-Object { $_.name -match '\.zip$' } |
+              Select-Object -First 1
+          if (-not $asset) { throw "No Ahk2Exe zip asset found" }
+
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile ahk2exe.zip -UseBasicParsing
+          New-Item -ItemType Directory -Path ahk2exe -Force | Out-Null
+          Expand-Archive ahk2exe.zip -DestinationPath ahk2exe -Force
+          Get-ChildItem ahk2exe -Recurse -File | Select-Object FullName, Length
 
       - name: Locate compiler + base
         shell: pwsh
         run: |
-          $ahkBase = (Get-ChildItem "C:\Program Files\AutoHotkey" -Filter "AutoHotkey64.exe" -Recurse -ErrorAction SilentlyContinue |
-                      Select-Object -First 1).FullName
-          if (-not $ahkBase) {
-              $ahkBase = (Get-ChildItem "C:\Program Files\AutoHotkey" -Filter "AutoHotkey.exe" -Recurse -ErrorAction SilentlyContinue |
-                          Select-Object -First 1).FullName
-          }
-          if (-not $ahkBase) { throw "Could not locate AutoHotkey base exe" }
-          Write-Host "Base:    $ahkBase"
+          $ErrorActionPreference = "Stop"
 
-          $ahk2exe = (Get-ChildItem "C:\Program Files\AutoHotkey" -Filter "Ahk2Exe.exe" -Recurse -ErrorAction SilentlyContinue |
-                      Select-Object -First 1).FullName
-          if (-not $ahk2exe) { throw "Could not locate Ahk2Exe.exe" }
-          Write-Host "Ahk2Exe: $ahk2exe"
+          $ahk2exeCandidates = @(
+              (Get-ChildItem ahk2exe -Filter "Ahk2Exe.exe" -Recurse -ErrorAction SilentlyContinue),
+              (Get-ChildItem ahk       -Filter "Ahk2Exe.exe" -Recurse -ErrorAction SilentlyContinue)
+          ) | Where-Object { $_ } | ForEach-Object { $_ }
+          $ahk2exe = $ahk2exeCandidates | Select-Object -First 1
+          if (-not $ahk2exe) { throw "Could not find Ahk2Exe.exe anywhere" }
+          Write-Host "Ahk2Exe: $($ahk2exe.FullName)"
 
-          "AHK_BASE=$ahkBase" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          "AHK2EXE=$ahk2exe" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          $baseCandidates = @(
+              (Get-ChildItem ahk -Filter "AutoHotkey64.exe" -Recurse -ErrorAction SilentlyContinue),
+              (Get-ChildItem ahk -Filter "AutoHotkey32.exe" -Recurse -ErrorAction SilentlyContinue),
+              (Get-ChildItem ahk -Filter "AutoHotkey.exe"   -Recurse -ErrorAction SilentlyContinue)
+          ) | Where-Object { $_ } | ForEach-Object { $_ }
+          $base = $baseCandidates | Select-Object -First 1
+          if (-not $base) { throw "Could not find any AutoHotkey base exe" }
+          Write-Host "Base:    $($base.FullName)"
+
+          "AHK2EXE=$($ahk2exe.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "AHK_BASE=$($base.FullName)"   | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - name: Compile FortEditPro.ahk to FortEditPro.exe
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           & "$env:AHK2EXE" /in FortEditPro.ahk /out FortEditPro.exe /base "$env:AHK_BASE"
           if (-not (Test-Path FortEditPro.exe)) { throw "Compile failed - no exe produced" }
           $size = (Get-Item FortEditPro.exe).Length / 1MB
