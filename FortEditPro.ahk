@@ -263,7 +263,12 @@ WIN_H := 600
 SB_W  := 220
 HD_H  := 54
 
-myGui := Gui("-Caption +Border", APP_NAME)
+; NOTE: temporarily using a standard captioned window. -Caption
+; borderless windows in AHK v2 can silently break child-control
+; click routing on some Windows builds - MinimalTest.exe proved
+; native Buttons work here, so the -Caption flag is the last
+; meaningful difference between the two.
+myGui := Gui("+Resize", APP_NAME)
 myGui.BackColor := COL_BG
 myGui.MarginX := 0
 myGui.MarginY := 0
