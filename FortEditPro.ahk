@@ -573,7 +573,18 @@ TrimC(hex) {
 ;  show + init
 ; ================================================================
 
+; DEBUG: a huge, obviously-clickable test button in the top-right of
+; the header. If clicking it doesn't pop a MsgBox, native Buttons are
+; not receiving clicks at all in this exe on this machine.
+debugBtn := myGui.Add("Button"
+    , "x" (WIN_W - 200) " y10 w130 h34", "TEST CLICK")
+debugBtn.OnEvent("Click", (*) => MsgBox(
+    "Buttons work! If ONLY this button responds and the nav tabs "
+    "don't, we know the bug is my ShowSection logic, not click "
+    "routing.", "Click test", "T3"))
+
 myGui.Show("w" WIN_W " h" WIN_H)
+WinActivate("ahk_id " myGui.Hwnd)   ; force focus so first click lands
 ShowSection("macros")
 UpdateStatusPill()
 
