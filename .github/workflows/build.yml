@@ -91,51 +91,55 @@ jobs:
           "AHK2EXE=$($ahk2exe.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "AHK_BASE=$($base.FullName)"   | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
-      - name: Compile FortEditPro.ahk to FortEditPro.exe
+      - name: Compile scripts to exes
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $args = @(
-              "/in",   "FortEditPro.ahk",
-              "/out",  "FortEditPro.exe",
-              "/base", "$env:AHK_BASE"
-          )
-          Write-Host "Running: $env:AHK2EXE $($args -join ' ')"
-
-          $p = Start-Process -FilePath "$env:AHK2EXE" `
-                             -ArgumentList $args `
-                             -Wait -NoNewWindow -PassThru
-          Write-Host "Ahk2Exe exit code: $($p.ExitCode)"
-
-          # Ahk2Exe sometimes flushes the exe just after exiting - give it a beat.
-          $deadline = (Get-Date).AddSeconds(15)
-          while (-not (Test-Path FortEditPro.exe) -and (Get-Date) -lt $deadline) {
-              Start-Sleep -Milliseconds 500
+          function Compile-Ahk($src, $out) {
+              $a = @("/in", $src, "/out", $out, "/base", "$env:AHK_BASE")
+              Write-Host "Running: $env:AHK2EXE $($a -join ' ')"
+              $p = Start-Process -FilePath "$env:AHK2EXE" `
+                                 -ArgumentList $a `
+                                 -Wait -NoNewWindow -PassThru
+              Write-Host "  exit code: $($p.ExitCode)"
+              $deadline = (Get-Date).AddSeconds(15)
+              while (-not (Test-Path $out) -and (Get-Date) -lt $deadline) {
+                  Start-Sleep -Milliseconds 500
+              }
+              if (-not (Test-Path $out)) {
+                  throw "Compile of $src failed"
+              }
+              $size = (Get-Item $out).Length / 1MB
+              Write-Host ("  built {0}: {1:N2} MB" -f $out, $size)
           }
 
-          if (-not (Test-Path FortEditPro.exe)) {
-              throw "Compile failed - no exe produced (exit $($p.ExitCode))"
-          }
-          $size = (Get-Item FortEditPro.exe).Length / 1MB
-          Write-Host ("Built FortEditPro.exe: {0:N2} MB" -f $size)
+          Compile-Ahk "FortEditPro.ahk" "FortEditPro.exe"
+          Compile-Ahk "MinimalTest.ahk" "MinimalTest.exe"
 
-      - name: Upload FortEditPro.exe artifact
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: FortEditPro
-          path: FortEditPro.exe
+          path: |
+            FortEditPro.exe
+            MinimalTest.exe
           if-no-files-found: error
 
       - name: Publish as GitHub Release (one-click download)
         uses: softprops/action-gh-release@v2
         with:
-          files: FortEditPro.exe
+          files: |
+            FortEditPro.exe
+            MinimalTest.exe
           tag_name: build-${{ github.run_number }}
           name: "FortEditPro build #${{ github.run_number }}"
           body: |
             Automated build from commit ${{ github.sha }}.
 
-            Download `FortEditPro.exe` below - no install needed.
+            - `FortEditPro.exe` - the real app.
+            - `MinimalTest.exe` - bare-bones click test. If clicking the
+              button in this exe pops a message box, native clicks work
+              on your machine and the bug is inside FortEditPro.
           fail_on_unmatched_files: true
           make_latest: "true"
